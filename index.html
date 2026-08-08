@@ -340,14 +340,34 @@
   .au-badge.admin { background: #E9E1FF; color: #5B3DBF; }
   .au-badge.suspended { background: #FFE1E4; color: #B0202E; }
   .au-badge.warn { background: #FFF1D6; color: #8A5A00; }
+  .au-badge.restricted { background: #FFE9D6; color: #954A00; }
+  .au-badge.boosted { background: #E3F6FF; color: #0A6E96; }
   .au-toggle { border: none; background: var(--chrome); width: 26px; height: 26px; border-radius: 50%; font-size: 12px; cursor: pointer; flex-shrink: 0; }
   .au-actions { display: none; flex-wrap: wrap; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .au-actions.show { display: flex; }
   .au-actions button { border: 1.5px solid var(--line); background: #fff; color: var(--ink); font-size: 11px; font-weight: 700; padding: 7px 10px; border-radius: 999px; cursor: pointer; }
   .au-actions button.danger { border-color: var(--err-red); color: var(--err-red); }
   .au-actions button.good { border-color: var(--ok-green); color: var(--ok-green); }
+  .au-actions button.warnclr { border-color: var(--smoke); color: var(--smoke); }
   .admin-load-more { width: 100%; border: 1.5px solid var(--line); background: #fff; color: var(--ink-soft); font-weight: 700; font-size: 12.5px; padding: 11px; border-radius: 14px; cursor: pointer; margin-top: 4px; }
   .admin-notify-card { background: var(--chrome); border-radius: 14px; padding: 14px; margin-bottom: 22px; }
+
+  /* ---------- Admin: activity log ---------- */
+  .admin-log-item { border: 1.5px solid var(--line); border-radius: 12px; padding: 9px 11px; margin-bottom: 7px; }
+  .admin-log-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .admin-log-action { font-size: 12px; font-weight: 700; color: var(--ink); text-transform: capitalize; }
+  .admin-log-time { font-size: 10px; color: var(--ink-faint); white-space: nowrap; }
+  .admin-log-detail { font-size: 11.5px; color: var(--ink-soft); margin-top: 3px; }
+  .admin-log-refresh { background: none; border: none; color: var(--smoke); font-size: 12px; font-weight: 700; cursor: pointer; padding: 0; }
+  .admin-section-title.with-action { display: flex; align-items: center; justify-content: space-between; }
+
+  /* ---------- Boost (premium) ---------- */
+  .boost-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(255,255,255,0.12); border: 1.5px solid rgba(255,255,255,0.3); border-radius: 12px; padding: 10px 12px; margin-top: 12px; }
+  .premium-card:not(.is-pro) .boost-row { background: var(--chrome); border-color: var(--line); }
+  .boost-row-label { font-size: 12px; font-weight: 700; }
+  .boost-row-sub { font-size: 10.5px; opacity: 0.75; margin-top: 1px; }
+  .boost-btn { border: none; background: var(--gold); color: #7A5200; font-weight: 800; font-size: 11.5px; padding: 8px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+  .boost-btn:disabled { opacity: 0.6; cursor: default; }
   .admin-notify-card select { width: 100%; border: 1.5px solid var(--line); border-radius: 12px; padding: 11px 12px; font-size: 13.5px; font-family: inherit; background: #fff; margin-bottom: 10px; }
 </style>
 </head>
@@ -490,6 +510,7 @@
             <li>&#10003; Priority placement in Nearby</li>
             <li>&#10003; Unlimited rewind on swipes</li>
             <li>&#10003; Wider search radius</li>
+            <li>&#10003; Boost to the top of Nearby</li>
           </ul>
           <div class="premium-plans">
             <button class="plan-btn" id="planMonthlyBtn" data-plan="monthly">
@@ -501,10 +522,24 @@
               <div class="pl-price">&#8377;999</div>
             </button>
           </div>
+          <div class="boost-row">
+            <div>
+              <div class="boost-row-label">&#128640; Boost my profile</div>
+              <div class="boost-row-sub">Premium &mdash; top of Nearby for 30 min</div>
+            </div>
+            <button class="boost-btn" id="boostBtnFree">Upgrade</button>
+          </div>
         </div>
         <div id="pcProBody" style="display:none;">
           <div class="pc-sub" id="pcExpiry" style="margin-bottom:14px;"></div>
-          <button class="pc-manage-btn" id="pcCancelBtn">Cancel subscription</button>
+          <div class="boost-row">
+            <div>
+              <div class="boost-row-label">&#128640; Boost my profile</div>
+              <div class="boost-row-sub" id="boostSub">Jump to the top of Nearby for 30 min</div>
+            </div>
+            <button class="boost-btn" id="boostBtn">Boost</button>
+          </div>
+          <button class="pc-manage-btn" id="pcCancelBtn" style="margin-top:12px;">Cancel subscription</button>
         </div>
       </div>
 
@@ -590,6 +625,12 @@
         <div class="field"><label>Message</label><textarea id="notifyBodyInput" maxlength="500" rows="3"></textarea></div>
         <button class="btn-primary" id="notifySendBtn">Send notification</button>
       </div>
+
+      <div class="admin-section-title with-action">
+        <span>Recent activity</span>
+        <button class="admin-log-refresh" id="adminLogRefreshBtn">Refresh</button>
+      </div>
+      <div id="adminLogList"></div>
 
       <div class="admin-section-title">Manage users</div>
       <div class="admin-search-row">
@@ -1689,7 +1730,62 @@ function renderPremiumCard() {
         }
       });
   }
+  updateBoostUI();
 }
+
+/* ============================================================
+   Boost (Premium feature — jump to top of Nearby for 30 min)
+   ============================================================ */
+let boostTickInterval = null;
+function updateBoostUI() {
+  const btn = document.getElementById('boostBtn');
+  const sub = document.getElementById('boostSub');
+  if (!btn || !myProfile) return;
+  const until = myProfile.boosted_until ? new Date(myProfile.boosted_until) : null;
+  const active = until && until.getTime() > Date.now();
+  if (boostTickInterval) { clearInterval(boostTickInterval); boostTickInterval = null; }
+  if (active) {
+    btn.disabled = true;
+    btn.textContent = 'Boosted';
+    const tick = () => {
+      const secsLeft = Math.max(0, Math.round((until.getTime() - Date.now()) / 1000));
+      if (secsLeft <= 0) {
+        clearInterval(boostTickInterval); boostTickInterval = null;
+        btn.disabled = false; btn.textContent = 'Boost';
+        sub.textContent = 'Jump to the top of Nearby for 30 min';
+        return;
+      }
+      const m = Math.floor(secsLeft / 60), s = secsLeft % 60;
+      sub.textContent = `Active \u2014 ${m}:${String(s).padStart(2, '0')} remaining`;
+    };
+    tick();
+    boostTickInterval = setInterval(tick, 1000);
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Boost';
+    sub.textContent = 'Jump to the top of Nearby for 30 min';
+  }
+}
+
+document.getElementById('boostBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('boostBtn');
+  btn.disabled = true;
+  try {
+    const { data, error } = await sb.rpc('activate_boost');
+    if (error) throw error;
+    myProfile.boosted_until = data;
+    updateBoostUI();
+    loadNearby();
+    showToast('Profile boosted for 30 minutes \u{1F680}');
+  } catch (err) {
+    btn.disabled = false;
+    showToast((err && err.message) || 'Could not activate boost');
+  }
+});
+
+document.getElementById('boostBtnFree').addEventListener('click', () => {
+  showToast('Boost is a Pifflink Premium feature');
+});
 
 async function choosePlan(plan) {
   const { data, error } = await sb.rpc('subscribe_premium', { p_plan: plan });
@@ -1940,9 +2036,37 @@ let notifySelectedUserId = null;
 
 async function loadAdminDashboard() {
   loadAdminStats();
+  loadAdminLog();
   adminUsersOffset = 0;
   searchAdminUsers(true);
 }
+
+/* ============================================================
+   Admin: activity log
+   ============================================================ */
+async function loadAdminLog() {
+  const box = document.getElementById('adminLogList');
+  if (!box) return;
+  box.innerHTML = '<div class="center-loading" style="height:60px;"><div class="spinner"></div></div>';
+  const { data, error } = await sb.rpc('admin_get_audit_log', { p_limit: 15 });
+  if (error) { box.innerHTML = `<div class="empty-hint">${escapeHtml(error.message)}</div>`; return; }
+  if (!data || !data.length) { box.innerHTML = `<div class="empty-hint">No admin activity yet.</div>`; return; }
+  box.innerHTML = data.map(row => {
+    const action = (row.action || '').replace(/_/g, ' ');
+    const who = row.admin_name ? escapeHtml(row.admin_name) : 'An admin';
+    const target = row.target_name ? ` &middot; ${escapeHtml(row.target_name)}` : '';
+    const detail = row.details ? escapeHtml(typeof row.details === 'string' ? row.details : JSON.stringify(row.details)) : '';
+    return `
+      <div class="admin-log-item">
+        <div class="admin-log-top">
+          <span class="admin-log-action">${escapeHtml(action)}</span>
+          <span class="admin-log-time">${timeAgo(row.created_at)}</span>
+        </div>
+        <div class="admin-log-detail">${who}${target}${detail ? ' &middot; ' + detail : ''}</div>
+      </div>`;
+  }).join('');
+}
+document.getElementById('adminLogRefreshBtn').addEventListener('click', loadAdminLog);
 
 async function loadAdminStats() {
   const grid = document.getElementById('adminStatsGrid');
@@ -1955,6 +2079,7 @@ async function loadAdminStats() {
     ['Suspended', data.suspended_users],
     ['Matches', data.matches_total],
     ['Messages today', data.messages_today],
+    ['New today', data.new_users_today],
   ];
   grid.innerHTML = cards.map(([label, val]) => `
     <div class="admin-stat-card"><div class="as-val">${val}</div><div class="as-label">${label}</div></div>
@@ -2013,14 +2138,17 @@ function adminUserCardHtml(u) {
   const avatarHtml = u.photo_url
     ? `<img class="avatar-img" src="${u.photo_url}" alt="">`
     : (u.avatar_initial || initial);
+  const isBoosted = u.is_boosted;
   const badges = [
     u.role === 'admin' ? '<span class="au-badge admin">ADMIN</span>' : '',
     u.is_premium ? '<span class="pro-badge">&#11088; PRO</span>' : '',
     u.is_suspended ? '<span class="au-badge suspended">SUSPENDED</span>' : '',
-    u.warning_count > 0 ? `<span class="au-badge warn">${u.warning_count} WARN</span>` : ''
+    u.warning_count > 0 ? `<span class="au-badge warn">${u.warning_count} WARN</span>` : '',
+    (u.messaging_restricted || u.swiping_restricted) ? '<span class="au-badge restricted">RESTRICTED</span>' : '',
+    isBoosted ? '<span class="au-badge boosted">BOOSTED</span>' : ''
   ].join('');
   return `
-    <div class="admin-user-card" data-id="${u.id}" data-role="${u.role}" data-premium="${u.is_premium}" data-suspended="${u.is_suspended}" data-name="${escapeHtml(u.display_name || '')}" data-email="${escapeHtml(u.email || '')}">
+    <div class="admin-user-card" data-id="${u.id}" data-role="${u.role}" data-premium="${u.is_premium}" data-suspended="${u.is_suspended}" data-msg-restricted="${!!u.messaging_restricted}" data-swipe-restricted="${!!u.swiping_restricted}" data-name="${escapeHtml(u.display_name || '')}" data-email="${escapeHtml(u.email || '')}">
       <div class="au-top">
         <div class="au-avatar" style="background:${u.avatar_color1 || '#FE8A3C'}">${avatarHtml}</div>
         <div class="au-info">
@@ -2036,6 +2164,8 @@ function adminUserCardHtml(u) {
         <button data-act="warn">Warn user</button>
         ${u.warning_count > 0 ? '<button data-act="waive">Waive warnings</button>' : ''}
         ${u.is_suspended ? '<button data-act="unsuspend" class="good">Unsuspend</button>' : '<button data-act="suspend" class="danger">Suspend</button>'}
+        ${u.messaging_restricted ? '<button data-act="unrestrict-msg" class="good">Unrestrict messaging</button>' : '<button data-act="restrict-msg" class="warnclr">Restrict messaging</button>'}
+        ${u.swiping_restricted ? '<button data-act="unrestrict-swipe" class="good">Unrestrict swiping</button>' : '<button data-act="restrict-swipe" class="warnclr">Restrict swiping</button>'}
         <button data-act="role">${u.role === 'admin' ? 'Remove admin' : 'Make admin'}</button>
       </div>
     </div>`;
@@ -2108,9 +2238,22 @@ async function handleAdminAction(act, card) {
       const { error } = await sb.rpc('admin_set_role', { p_user_id: id, p_role: makingAdmin ? 'admin' : 'user' });
       if (error) throw error;
       showToast(makingAdmin ? 'User is now an admin' : 'Admin access removed');
+    } else if (act === 'restrict-msg' || act === 'unrestrict-msg') {
+      const on = act === 'restrict-msg';
+      if (on && !window.confirm(`Stop ${name} from sending messages?`)) return;
+      const { error } = await sb.rpc('admin_restrict_user', { p_user_id: id, p_restriction: 'messaging', p_on: on });
+      if (error) throw error;
+      showToast(on ? 'Messaging restricted' : 'Messaging restriction lifted');
+    } else if (act === 'restrict-swipe' || act === 'unrestrict-swipe') {
+      const on = act === 'restrict-swipe';
+      if (on && !window.confirm(`Stop ${name} from swiping?`)) return;
+      const { error } = await sb.rpc('admin_restrict_user', { p_user_id: id, p_restriction: 'swiping', p_on: on });
+      if (error) throw error;
+      showToast(on ? 'Swiping restricted' : 'Swiping restriction lifted');
     }
     searchAdminUsers(true);
     loadAdminStats();
+    loadAdminLog();
   } catch (err) {
     showToast((err && err.message) || 'Action failed');
   }
